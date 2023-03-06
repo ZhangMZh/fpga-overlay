@@ -3,7 +3,11 @@
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <sycl/sycl.hpp>
 
-#define LVEC 32768
+#ifdef FPGA_EMULATOR
+    #define LVEC 32768
+#else
+    #define LVEC 67108864 // 2^26
+#endif
 
 using namespace sycl;
 
@@ -12,10 +16,8 @@ using namespace sycl;
 class XLoader;
 class YLoader;
 class DotProduct;
-class ZUnloader;
 class XPipe;
 class YPipe;
-class ZPipe;
 
 SYCL_EXTERNAL float dot_prod_16(sycl::float16 x, sycl::float16 y);
 
@@ -61,9 +63,10 @@ int main() {
             sycl::device_ptr<float> X_d(X_device);
             for (int i = 0; i < loop_iter; i++) {
                 float16 ddr_read;
+                int base_addr = i << 4;
 #pragma unroll
                 for (int vec_idx = 0; vec_idx < 16; vec_idx++) {
-                    ddr_read[vec_idx] = X_d[(i << 4) + vec_idx];
+                    ddr_read[vec_idx] = X_d[base_addr + vec_idx];
                 }
                 XVecPipe::write(ddr_read);
             }
@@ -74,9 +77,10 @@ int main() {
             sycl::device_ptr<float> Y_d(Y_device);
             for (int i = 0; i < loop_iter; i++) {
                 float16 ddr_read;
+                int base_addr = i << 4;
 #pragma unroll
                 for (int vec_idx = 0; vec_idx < 16; vec_idx++) {
-                    ddr_read[vec_idx] = Y_d[(i << 4) + vec_idx];
+                    ddr_read[vec_idx] = Y_d[base_addr + vec_idx];
                 }
                 YVecPipe::write(ddr_read);
             }

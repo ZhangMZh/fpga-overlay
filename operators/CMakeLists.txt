@@ -1,7 +1,7 @@
 # Operator library source files
 set(OPERATOR_SPEC dot_prod.cpp)
 set(SYCL_SOURCE_OBJECT dot_prod.o)
-set(LIBRARY_ARCHIVE lib.a)
+set(LIBRARY_ARCHIVE oplib.a)
 
 ###############################################################################
 ### Generate Library
@@ -17,7 +17,7 @@ add_custom_target(
 
 # Create library archive
 # This executes:
-# fpga_libtool op.o --target sycl --create lib.a
+# fpga_libtool op.o --target sycl --create oplib.a
 add_custom_target(create_library_archive DEPENDS ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/${LIBRARY_ARCHIVE})
 add_custom_command(OUTPUT ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/${LIBRARY_ARCHIVE}
                    COMMAND fpga_libtool ${SYCL_SOURCE_OBJECT} --target sycl --create ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/${LIBRARY_ARCHIVE}
