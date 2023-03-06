@@ -1,13 +1,29 @@
+#include "dot.hpp"
 #include "exception_handler.hpp"
-#include "lib.hpp"
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <sycl/sycl.hpp>
 
-// Forward declare the kernel name in the global scope.
+#define LVEC 32768
+
+using namespace sycl;
+
+// Forward declare the kernel and pipe names
 // This FPGA best practice reduces name mangling in the optimization report.
+class XLoader;
+class YLoader;
 class DotProduct;
+class ZUnloader;
+class XPipe;
+class YPipe;
+class ZPipe;
 
 SYCL_EXTERNAL float dot_prod_16(sycl::float16 x, sycl::float16 y);
+
+constexpr size_t num_elem = LVEC;
+constexpr size_t loop_iter = LVEC >> 4;
+
+using XVecPipe = sycl::ext::intel::pipe<XPipe, float16, 256>;
+using YVecPipe = sycl::ext::intel::pipe<YPipe, float16, 256>;
 
 int main() {
 #if defined(FPGA_EMULATOR)
@@ -16,54 +32,104 @@ int main() {
     sycl::ext::intel::fpga_selector device_selector;
 #endif
 
-    try {
-        sycl::queue q(device_selector, fpga_tools::exception_handler,
-                      sycl::property::queue::enable_profiling());
-        std::cout << "Device name: "
-                  << q.get_device().get_info<sycl::info::device::name>().c_str()
-                  << std::endl;
+    std::vector<sycl::event> kernel_events;
+    sycl::queue q(device_selector, fpga_tools::exception_handler,
+                  sycl::property::queue::enable_profiling());
+    std::cout << "Device name: "
+              << q.get_device().get_info<sycl::info::device::name>().c_str()
+              << std::endl;
 
-        float *X = (float *)malloc(num_elem_A * sizeof(float));
-        float *Y = (float *)malloc(num_elem_B * sizeof(float));
+    float *X = (float *)malloc(num_elem * sizeof(float));
+    float *Y = (float *)malloc(num_elem * sizeof(float));
+    float result, gold;
 
-        q..single_task<DotProduct>([=]() {
-            // SyclSquare is a SYCL library function, defined in
-            // lib_sycl.cpp.
-            float a_sq = SyclSquare(kA);
-            float b_sq = SyclSquare(kB);
-
-            // RtlByteswap is an RTL library.
-            //  - When compiled for FPGA, Verilog module byteswap_uint in
-            //  lib_rtl.v
-            //    is instantiated in the datapath by the compiler.
-            //  - When compiled for FPGA emulator (CPU), the C model of
-            //  RtlByteSwap
-            //    in lib_rtl_model.cpp is used instead.
-            accessor_c[0] = RtlByteswap((unsigned)(a_sq + b_sq));
-        });
-
-    } catch (sycl::exception const &e) {
-        // Catches exceptions in the host code
-        std::cerr << "Caught a SYCL host exception:\n" << e.what() << "\n";
-
-        // Most likely the runtime couldn't find FPGA hardware!
-        if (e.code().value() == CL_DEVICE_NOT_FOUND) {
-            std::cerr
-                << "If you are targeting an FPGA, please ensure that your "
-                   "system has a correctly configured FPGA board.\n";
-            std::cerr
-                << "Run sys_check in the oneAPI root directory to verify.\n";
-            std::cerr << "If you are targeting the FPGA emulator, compile with "
-                         "-DFPGA_EMULATOR.\n";
-        }
-        std::terminate();
+    for (size_t i = 0; i < num_elem; i++) {
+        X[i] = random();
+        Y[i] = random();
+        gold += X[i] * Y[i];
     }
 
-    float kA = 2.0f;
-    float kB = 3.0f;
-    // Compute the expected "golden" result
-    unsigned gold = (kA * kA) + (kB * kB);
-    gold = gold << 16 | gold >> 16;
+    float *X_device = sycl::malloc_device<float>(num_elem, q);
+    float *Y_device = sycl::malloc_device<float>(num_elem, q);
+    float *Z_device = sycl::malloc_device<float>(1, q);
+
+    q.memcpy(X_device, X, num_elem * sizeof(float)).wait();
+    q.memcpy(Y_device, Y, num_elem * sizeof(float)).wait();
+
+    kernel_events.push_back(
+        q.single_task<XLoader>([=]() [[intel::kernel_args_restrict]] {
+            sycl::device_ptr<float> X_d(X_device);
+            for (int i = 0; i < loop_iter; i++) {
+                float16 ddr_read;
+#pragma unroll
+                for (int vec_idx = 0; vec_idx < 16; vec_idx++) {
+                    ddr_read[vec_idx] = X_d[i << 4 + vec_idx];
+                }
+                XVecPipe::write(ddr_read);
+            }
+        }));
+
+    kernel_events.push_back(
+        q.single_task<YLoader>([=]() [[intel::kernel_args_restrict]] {
+            sycl::device_ptr<float> Y_d(Y_device);
+            for (int i = 0; i < loop_iter; i++) {
+                float16 ddr_read;
+#pragma unroll
+                for (int vec_idx = 0; vec_idx < 16; vec_idx++) {
+                    ddr_read[vec_idx] = Y_d[i << 4 + vec_idx];
+                }
+                YVecPipe::write(ddr_read);
+            }
+        }));
+
+    kernel_events.push_back(
+        q.single_task<DotProduct>([=]() [[intel::kernel_args_restrict]] {
+            sycl::device_ptr<float> Z_d(Z_device);
+            float acc = 0.0f;
+            for (int i = 0; i < loop_iter; i++) {
+                float16 x_vec = XVecPipe::read();
+                float16 y_vec = YVecPipe::read();
+                partial_acc = dot_prod_16(x_vec, y_vec);
+                acc += partial_acc;
+            }
+            Z_d[0] = acc;
+        }));
+
+    for (unsigned int i = 0; i < kernel_events.size(); i++) {
+        kernel_events.at(i).wait();
+    }
+
+    if (kernel_events.size() > 0) {
+        double k_earliest_start_time =
+            kernel_events.at(0)
+                .get_profiling_info<
+                    sycl::info::event_profiling::command_start>();
+        double k_latest_end_time =
+            kernel_events.at(0)
+                .get_profiling_info<sycl::info::event_profiling::command_end>();
+        for (unsigned i = 1; i < kernel_events.size(); i++) {
+            double tmp_start =
+                kernel_events.at(i)
+                    .get_profiling_info<
+                        sycl::info::event_profiling::command_start>();
+            double tmp_end =
+                kernel_events.at(i)
+                    .get_profiling_info<
+                        sycl::info::event_profiling::command_end>();
+            if (tmp_start < k_earliest_start_time) {
+                k_earliest_start_time = tmp_start;
+            }
+            if (tmp_end > k_latest_end_time) {
+                k_latest_end_time = tmp_end;
+            }
+        }
+        // Get time in ns
+        double events_time = (k_latest_end_time - k_earliest_start_time);
+        printf("  Time: %.5f ns\n", events_time);
+        printf("  Throughput: %.2f GFLOPS\n", (double)2.0 * LVEC / events_time);
+    }
+
+    q.memcpy(&result, Z_device, sizeof(float)).wait();
 
     // Check the results
     if (result != gold) {
