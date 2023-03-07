@@ -17,7 +17,7 @@ endif()
 set(EMULATOR_COMPILE_FLAGS "-fsycl -fintelfpga -DFPGA_EMULATOR")
 set(EMULATOR_LINK_FLAGS "-fsycl -fintelfpga")
 set(HARDWARE_COMPILE_FLAGS "-fsycl -fintelfpga")
-set(HARDWARE_LINK_FLAGS "-fsycl -fintelfpga -reuse-exe=${CMAKE_BINARY_DIR}/${FPGA_TARGET} -Xshardware -Xstarget=${FPGA_DEVICE} -Xsno-interleaving=default -Xsffp-reassociate -Xsprofile ${USER_HARDWARE_FLAGS}")
+set(HARDWARE_LINK_FLAGS "-fsycl -fintelfpga -reuse-exe=${CMAKE_BINARY_DIR}/${FPGA_TARGET} -Xshardware -Xstarget=${FPGA_DEVICE} -Xsffp-reassociate -Xsprofile ${USER_HARDWARE_FLAGS}")
 
 ###############################################################################
 ### FPGA Emulator

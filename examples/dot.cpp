@@ -3,11 +3,7 @@
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <sycl/sycl.hpp>
 
-#ifdef FPGA_EMULATOR
-    #define LVEC 32768
-#else
-    #define LVEC 67108864 // 2^26
-#endif
+#define LVEC 33554432 // 2^25
 
 using namespace sycl;
 
@@ -18,8 +14,6 @@ class YLoader;
 class DotProduct;
 class XPipe;
 class YPipe;
-
-SYCL_EXTERNAL float dot_prod_16(sycl::float16 x, sycl::float16 y);
 
 constexpr size_t num_elem = LVEC;
 constexpr size_t loop_iter = LVEC >> 4;
@@ -46,8 +40,8 @@ int main() {
     float result, gold = 0.0f;
 
     for (size_t i = 0; i < num_elem; i++) {
-        X[i] = random();
-        Y[i] = random();
+        X[i] = (float)(rand() % 256) / 256.0f;
+        Y[i] = (float)(rand() % 256) / 256.0f;
         gold += X[i] * Y[i];
     }
 
@@ -60,28 +54,18 @@ int main() {
 
     kernel_events.push_back(
         q.single_task<XLoader>([=]() [[intel::kernel_args_restrict]] {
-            sycl::device_ptr<float> X_d(X_device);
+            sycl::device_ptr<float16> X_d((float16 *)X_device);
             for (int i = 0; i < loop_iter; i++) {
-                float16 ddr_read;
-                int base_addr = i << 4;
-#pragma unroll
-                for (int vec_idx = 0; vec_idx < 16; vec_idx++) {
-                    ddr_read[vec_idx] = X_d[base_addr + vec_idx];
-                }
+                float16 ddr_read = X_d[i];
                 XVecPipe::write(ddr_read);
             }
         }));
 
     kernel_events.push_back(
         q.single_task<YLoader>([=]() [[intel::kernel_args_restrict]] {
-            sycl::device_ptr<float> Y_d(Y_device);
+            sycl::device_ptr<float16> Y_d((float16 *)Y_device);
             for (int i = 0; i < loop_iter; i++) {
-                float16 ddr_read;
-                int base_addr = i << 4;
-#pragma unroll
-                for (int vec_idx = 0; vec_idx < 16; vec_idx++) {
-                    ddr_read[vec_idx] = Y_d[base_addr + vec_idx];
-                }
+                float16 ddr_read = Y_d[i];
                 YVecPipe::write(ddr_read);
             }
         }));
