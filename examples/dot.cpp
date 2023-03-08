@@ -1,3 +1,4 @@
+#include "data_transfer.hpp"
 #include "operators.hpp"
 #include "exception_handler.hpp"
 #include <sycl/ext/intel/fpga_extensions.hpp>
@@ -15,7 +16,7 @@ class DotProduct;
 class XPipe;
 class YPipe;
 
-constexpr size_t num_elem = LVEC;
+constexpr size_t num_elems = LVEC;
 constexpr size_t loop_iter = LVEC >> 4;
 
 using XVecPipe = sycl::ext::intel::pipe<XPipe, float16, 256>;
@@ -35,39 +36,31 @@ int main() {
               << q.get_device().get_info<sycl::info::device::name>().c_str()
               << std::endl;
 
-    float *X = (float *)malloc(num_elem * sizeof(float));
-    float *Y = (float *)malloc(num_elem * sizeof(float));
+    float *X = (float *)malloc(num_elems * sizeof(float));
+    float *Y = (float *)malloc(num_elems * sizeof(float));
     float result, gold = 0.0f;
 
-    for (size_t i = 0; i < num_elem; i++) {
+    for (size_t i = 0; i < num_elems; i++) {
         X[i] = (float)(rand() % 256) / 256.0f;
         Y[i] = (float)(rand() % 256) / 256.0f;
         gold += X[i] * Y[i];
     }
 
-    float *X_device = sycl::malloc_device<float>(num_elem, q);
-    float *Y_device = sycl::malloc_device<float>(num_elem, q);
+    float *X_device = sycl::malloc_device<float>(num_elems, q);
+    float *Y_device = sycl::malloc_device<float>(num_elems, q);
     float *Z_device = sycl::malloc_device<float>(1, q);
 
-    q.memcpy(X_device, X, num_elem * sizeof(float)).wait();
-    q.memcpy(Y_device, Y, num_elem * sizeof(float)).wait();
+    q.memcpy(X_device, X, num_elems * sizeof(float)).wait();
+    q.memcpy(Y_device, Y, num_elems * sizeof(float)).wait();
 
     kernel_events.push_back(
         q.single_task<XLoader>([=]() [[intel::kernel_args_restrict]] {
-            sycl::device_ptr<float16> X_d((float16 *)X_device);
-            for (int i = 0; i < loop_iter; i++) {
-                float16 ddr_read = X_d[i];
-                XVecPipe::write(ddr_read);
-            }
+            DRAMToPipe<float, num_elems, 16, XVecPipe>(X_device, 1, 1);
         }));
 
     kernel_events.push_back(
         q.single_task<YLoader>([=]() [[intel::kernel_args_restrict]] {
-            sycl::device_ptr<float16> Y_d((float16 *)Y_device);
-            for (int i = 0; i < loop_iter; i++) {
-                float16 ddr_read = Y_d[i];
-                YVecPipe::write(ddr_read);
-            }
+            DRAMToPipe<float, num_elems, 16, YVecPipe>(Y_device, 1, 1);
         }));
 
     kernel_events.push_back(
@@ -120,7 +113,7 @@ int main() {
     q.memcpy(&result, Z_device, sizeof(float)).wait();
 
     // Check the results
-    if (fabs(result - gold) > 0.005*fabs(gold)) {
+    if (fabs(result - gold) > 0.005 * fabs(gold)) {
         std::cout << "result: " << result << ", gold: " << gold << std::endl;
         std::cout << "FAILED: result is incorrect!" << std::endl;
         return -1;
