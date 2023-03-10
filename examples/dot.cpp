@@ -21,8 +21,8 @@ constexpr size_t loop_iter = LVEC >> 4;
 
 using XVecPipe = sycl::ext::intel::pipe<XPipe, sycl::vec<float, 16>, 256>;
 using YVecPipe = sycl::ext::intel::pipe<YPipe, sycl::vec<float, 16>, 256>;
-using BurstCoalescedLSU = ext::intel::lsu<ext::intel::burst_coalesce<true>,
-                                          ext::intel::statically_coalesce<false>>;
+using BurstCoalescedLSU = sycl::ext::intel::lsu<sycl::ext::intel::burst_coalesce<true>,
+                                                sycl::ext::intel::statically_coalesce<false>>;
 
 int main() {
 #if defined(FPGA_EMULATOR)

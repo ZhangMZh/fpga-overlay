@@ -1,5 +1,5 @@
-#ifndef __MEMORY_TRANSFERS_HPP__
-#define __MEMORY_TRANSFERS_HPP__
+#ifndef __DATA_TRANSFERS_HPP__
+#define __DATA_TRANSFERS_HPP__
 
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <sycl/sycl.hpp>
@@ -117,4 +117,4 @@ void BRAMToPipe(T bram_ptr[cols][rows]) {
     }
 }
 
-#endif /* __MEMORY_TRANSFERS_HPP__ */
+#endif /* __DATA_TRANSFERS_HPP__ */
