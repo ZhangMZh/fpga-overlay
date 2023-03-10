@@ -1,7 +1,7 @@
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <sycl/sycl.hpp>
 
-SYCL_EXTERNAL float dot_prod_16(sycl::float16 x, sycl::float16 y) {
+SYCL_EXTERNAL float dot_prod_16(sycl::vec<float, 16> x, sycl::vec<float, 16> y) {
     float sum = 0.0f;
 #pragma unroll
     for (int i = 0; i < 16; i++) {
